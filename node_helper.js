@@ -11,35 +11,63 @@
  */
 
 const NodeHelper = require('node_helper');
-const spawn = require('child_process').spawn;
+//const spawn = require('child_process').spawn;
 const exec = require('child_process').exec;
+const Log = require("logger");
+const path = require("path");
+const {PythonShell} = require("python-shell");
 
 module.exports = NodeHelper.create({
 
 	start: function() {
 		this.started = false;
 		this.activated = true;
+                Log.log(`Starting node helper for: ${this.name}`);
 	},
 
 	getDataPIR: function() {
 		//exec('pkill -f "python3 -u ' + __dirname + '/pir.py"', { timeout: 500 });
-		const process = spawn('python3', ['-u', __dirname + '/pir.py', this.config.sensorPin]);
-
+		//const process = spawn('python3', ['-u', __dirname + '/pir.py', this.config.sensorPin]);
 		var self = this;
-		process.stdout.on('data', function(data) {
-			if(data.indexOf("PIR_START") === 0) {
+		var py = path.resolve(__dirname, "pir.py");
+
+		var option = {
+			mode: "text",
+			pythonPath: "/usr/bin/python3",
+			pythonOptions: ['-u'],
+			args: [this.config.sensorPin],
+		}
+		this.shell = new PythonShell(py, option)
+		this.shell.on("message", (message)=>{
+			Log.info(`[PIR] message:` + message)
+			if (message === "PIR_START") {
 				self.sendSocketNotification("STARTED", true);
 				self.started = true;
 			}
-
-			if(data.indexOf("USER_PRESENCE") === 0) {
+			if (message === "USER_PRESENCE") {
 				self.sendSocketNotification("USER_PRESENCE", true);
 				self.resetTimeout();
-				if(self.activated == false) {
+
+				if (self.activated == false) {
 					self.activateMonitor();
 				}
 			}
-		});
+		})
+		this.shell.on("error", (message)=>{
+			this.shell.end()
+			if (!message.traceback.search("KeyboardInterrupt")) {
+				Log.log(message)
+			} else {
+				Log.log("[PIR] Keyboard Interrupted")
+			}
+			Log.log("[PIR] PIR script is finished.")
+		})
+		this.shell.on("close", ()=>{
+			setTimeout(()=>{
+				Log.log("[PIR] Python script is terminated. It will restart soon.")
+				this.getDataPIR()
+			}, 500)
+		})
 	},
 
 	activateMonitor: function() {
@@ -105,4 +133,3 @@ module.exports = NodeHelper.create({
 		}
 	}
 });
-
